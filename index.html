@@ -1217,13 +1217,20 @@ window.updateNavForUser = updateNavForUser;
 
 // ── Populate profile screen with real logged-in user data ─────────────────
 function renderProfile() {
-  const u = currentUser;
-  if (!u) return;
+  const u = window.currentUser || currentUser;
 
-  // Initials avatar
-  const initials = u.name
-    ? u.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
-    : u.email.slice(0, 2).toUpperCase();
+  // If Firebase hasn't returned user yet, retry in 300ms
+  if (!u) {
+    setTimeout(renderProfile, 300);
+    return;
+  }
+
+  // Initials avatar — from display name or email
+  const nameParts = (u.name || u.email.split('@')[0]).trim().split(' ').filter(Boolean);
+  const initials  = nameParts.length >= 2
+    ? (nameParts[0][0] + nameParts[nameParts.length - 1][0]).toUpperCase()
+    : nameParts[0].slice(0, 2).toUpperCase();
+
   const avatarEl = document.getElementById('profile-avatar-initials');
   if (avatarEl) avatarEl.textContent = initials;
 
@@ -1233,12 +1240,9 @@ function renderProfile() {
   if (nameEl)  nameEl.textContent  = u.name  || u.email.split('@')[0];
   if (emailEl) emailEl.textContent = u.email || '';
 
-  // Member since — use Firebase uid creation year if available
+  // Member since
   const sinceEl = document.getElementById('profile-member-since');
-  if (sinceEl) {
-    const year = new Date().getFullYear();
-    sinceEl.textContent = 'Member since ' + year;
-  }
+  if (sinceEl) sinceEl.textContent = 'Member since ' + new Date().getFullYear();
 
   // Account settings email field
   const emailInput = document.getElementById('profile-email-input');
@@ -1430,19 +1434,22 @@ window.renderAdminFull  = renderAdminFull;
       return map[code] || ('Error: ' + (code || 'unknown') + '. Please try again.');
     }
 
-    // Keep auth state in sync
+    // Keep auth state in sync — fires on every page load if user is already signed in
     onAuthStateChanged(auth, user => {
       if (user) {
-        currentUser = {
-          uid:   user.uid,
-          name:  user.displayName || user.email.split('@')[0],
-          email: user.email,
-          role:  ADMIN_EMAILS.includes(user.email.toLowerCase()) ? 'admin' : 'user'
+        window.currentUser = {
+          uid:      user.uid,
+          name:     user.displayName || user.email.split('@')[0],
+          email:    user.email,
+          verified: user.emailVerified,
+          role:     ADMIN_EMAILS.includes(user.email.toLowerCase()) ? 'admin' : 'user'
         };
-        updateNavForUser();
+        window.updateNavForUser?.();
+        // If profile page is open, refresh it with real data
+        window.renderProfile?.();
       } else {
-        currentUser = null;
-        updateNavForUser();
+        window.currentUser = null;
+        window.updateNavForUser?.();
       }
     });
   </script>
