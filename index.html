@@ -1279,8 +1279,8 @@ async function fsLoadProducts() {
   const f = fs(); if (!f) return;
   try {
     const snap = await f.getDocs(f.collection(f.db, 'products'));
-    if (snap.empty) { await fsSeedProducts(); return; }
-    adminProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (snap.empty) { console.log('Products collection empty — using default products'); return; }
+    adminProducts = snap.docs.map(d => ({ id: d.id, firestoreId: d.id, ...d.data() }));
     renderHomePage(); renderListingPage();
     // If admin is viewing dashboard, update it too
     const kpiRow = document.getElementById('admin-kpi-row');
@@ -1416,30 +1416,35 @@ async function fsUpdateOrderStatus(orderId, status) {
 async function fsLoadAllOrders() {
   const f = fs(); if (!f) return;
   try {
-    const snap = await f.getDocs(f.query(f.collection(f.db, 'orders'), f.orderBy('createdAt', 'desc')));
+    // No orderBy — avoids needing a Firestore composite index
+    const snap = await f.getDocs(f.collection(f.db, 'orders'));
     adminOrderList = snap.docs.map(d => {
       const data = d.data();
       const itemsStr = Array.isArray(data.items)
-        ? data.items.map(i => i.name + (i.quantity > 1 ? ' ×' + i.quantity : '')).join(', ')
+        ? data.items.map(i => i.name + (i.quantity > 1 ? ' x' + i.quantity : '')).join(', ')
         : (data.items || '—');
       const dateStr = data.createdAt?.toDate
         ? data.createdAt.toDate().toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric'})
         : '—';
       return {
-        id:       data.orderId,
-        customer: data.customerName,
-        email:    data.customerEmail,
+        id:       data.orderId || d.id,
+        customer: data.customerName  || '—',
+        email:    data.customerEmail || '—',
         items:    itemsStr,
-        total:    '$' + Number(data.total).toFixed(2),
+        total:    '$' + Number(data.total || 0).toFixed(2),
         date:     dateStr,
-        status:   data.status
+        status:   data.status || 'Processing'
       };
     });
+    // Sort client-side by date descending
+    adminOrderList.sort((a, b) => b.id.localeCompare(a.id));
     console.log('✅ Orders loaded from Firestore:', adminOrderList.length);
-    // Re-render dashboard and orders tab with real data
     renderAdminDashboard();
     renderAdminOrders();
-  } catch(e) { console.warn('Admin orders load failed:', e); }
+  } catch(e) {
+    console.error('Admin orders load failed:', e.message);
+    showToast('⚠️ Could not load orders: ' + e.message, 'error');
+  }
 }
 
 // ══════════════════════════════
@@ -1450,7 +1455,19 @@ async function fsLoadAds() {
   try {
     const snap = await f.getDocs(f.collection(f.db, 'advertisements'));
     if (!snap.empty) {
-      adminAdList = snap.docs.map(d => ({ id: d.id, firestoreId: d.id, ...d.data() }));
+      adminAdList = snap.docs.map(d => ({
+        id:          d.id,
+        firestoreId: d.id,
+        title:       d.data().title || '',
+        sub:         d.data().subtitle || d.data().sub || '',
+        code:        d.data().promoCode || d.data().code || '',
+        btn:         d.data().ctaButton || d.data().btn || '',
+        bg:          d.data().theme || d.data().bg || 'navy',
+        active:      d.data().active !== false,
+        clicks:      d.data().clicks || 0,
+        impressions: d.data().impressions || 0,
+      }));
+      console.log('✅ Ads loaded from Firestore:', adminAdList.length);
       renderAdminAds?.();
     }
   } catch(e) { console.warn('Ads load failed:', e); }
@@ -1566,7 +1583,7 @@ window.fsDeleteProduct = fsDeleteProduct;
 
     // ── Admin email list — these users get the Admin Dashboard ───────────────
     const ADMIN_EMAILS = [
-      "sarveshsolanke@gmail.com",
+      "admin1@uwindsor.ca",
       "admin2@uwindsor.ca",
       "admin3@uwindsor.ca",
       "admin4@uwindsor.ca"
@@ -3183,7 +3200,7 @@ let adminOrderList = [];
 
 async function renderAdminFull() {
   const badge = document.getElementById('admin-user-badge');
-  if (badge && currentUser) badge.textContent = (currentUser.name || currentUser.email) + ' · ADMIN';
+  const cu = window.currentUser || currentUser; if (badge && cu) badge.textContent = (cu.name || cu.email || 'Admin') + ' · ADMIN';
 
   // Show loading spinner
   const kpiRow = document.getElementById('admin-kpi-row');
